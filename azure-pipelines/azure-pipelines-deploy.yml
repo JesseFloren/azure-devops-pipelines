@@ -1,0 +1,39 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  azureServiceConnection: ado-sc-{org}tst-plt-man-prd-sub002-PLZ-Canary-Tenant-Testing
+  location: westeurope
+  templateFile: main.bicep
+  parameterFile: main.bicepparam
+
+stages:
+- stage: Deploy
+  displayName: Deploy Managed DevOps Pools platform
+  jobs:
+  - job: SubscriptionDeployment
+    displayName: Run subscription-scope Bicep deployment
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: Deploy Bicep template
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+
+          echo "Validating Azure context"
+          az account show --query "{subscription:id, tenant:tenantId, user:user.name, type:user.type}" -o json
+
+          echo "Starting subscription-scope deployment"
+          az deployment sub create \
+            --name "mdp-deployment-$(Build.BuildId)" \
+            --location "$(location)" \
+            --template-file "$(templateFile)" \
+            --parameters @"$(parameterFile)"

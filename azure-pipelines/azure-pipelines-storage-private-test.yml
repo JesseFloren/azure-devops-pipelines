@@ -1,0 +1,76 @@
+trigger: none
+pr: none
+
+pool:
+  name: man-dev-devops-mdp001
+
+variables:
+  azureServiceConnection: sc-man-pct
+  envShort: dev
+  storageAccountName: man$(envShort)pctst001
+  storageContainerName: pe-connectivity-test
+  testBlobName: mdp-private-endpoint-test.txt
+
+stages:
+- stage: PrivateStorageConnectivity
+  displayName: Validate private storage connectivity
+  jobs:
+  - job: BlobReadWrite
+    displayName: Upload and read blob via private endpoint path
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: Identity precheck
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          echo "Authenticated context used by this service connection:"
+          az account show --query "{subscription:id, tenant:tenantId, user:user.name, type:user.type}" -o json
+
+    - task: AzureCLI@2
+      displayName: Blob write/read test
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+
+          echo "Using storage account: $(storageAccountName)"
+          az storage account show --name "$(storageAccountName)" --query "{name:name,publicNetworkAccess:publicNetworkAccess}" -o table
+
+          BLOB_FQDN=$(az storage account show --name "$(storageAccountName)" --query "primaryEndpoints.blob" -o tsv | sed -E 's#https?://([^/]+)/?#\1#')
+          echo "Blob endpoint FQDN: ${BLOB_FQDN}"
+          nslookup "${BLOB_FQDN}" || true
+
+          az storage container create \
+            --name "$(storageContainerName)" \
+            --account-name "$(storageAccountName)" \
+            --auth-mode login \
+            --only-show-errors 1>/dev/null
+
+          echo "Managed DevOps Pool private endpoint connectivity test $(date -u +%FT%TZ)" > test.txt
+
+          az storage blob upload \
+            --container-name "$(storageContainerName)" \
+            --name "$(testBlobName)" \
+            --file test.txt \
+            --account-name "$(storageAccountName)" \
+            --auth-mode login \
+            --overwrite true \
+            --only-show-errors
+
+          az storage blob download \
+            --container-name "$(storageContainerName)" \
+            --name "$(testBlobName)" \
+            --file downloaded.txt \
+            --account-name "$(storageAccountName)" \
+            --auth-mode login \
+            --only-show-errors
+
+          diff -u test.txt downloaded.txt
+          echo "SUCCESS: Blob upload/download works from MDP agent."
