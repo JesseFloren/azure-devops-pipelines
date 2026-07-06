@@ -36,4 +36,4 @@ stages:
             --name "mdp-deployment-$(Build.BuildId)" \
             --location "$(location)" \
             --template-file "$(templateFile)" \
-            --parameters @"$(parameterFile)"
+            --parameters "$(parameterFile)"
